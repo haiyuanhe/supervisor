@@ -1539,6 +1539,7 @@ class UnhosedConfigParser(ConfigParser.RawConfigParser):
             for key, value in self.items(section):
                 if HERE_FORMAT in value:
                     value = value.replace(HERE_FORMAT, here)
+                    value = value.replace("\\", "/")
                     self.set(section, key, value)
 
 
