@@ -1,37 +1,38 @@
 import types
 
-import datetime
 import os
 import re
 import time
 import traceback
+import datetime
 
 import meld3
 
-from supervisor.compat import as_bytes
 from supervisor.compat import urllib
 from supervisor.compat import urlparse
 from supervisor.compat import as_string
+from supervisor.compat import as_bytes
 from supervisor.compat import PY2
 from supervisor.compat import unicode
-from supervisor.http import NOT_DONE_YET
+
 from supervisor.medusa import producers
-from supervisor.medusa.http_server import get_header
 from supervisor.medusa.http_server import http_date
+from supervisor.medusa.http_server import get_header
 from supervisor.medusa.xmlrpc_handler import collector
-from supervisor.options import (
-    VERSION,
-    make_namespec,
-    split_namespec
-)
+
 from supervisor.process import ProcessStates
+from supervisor.http import NOT_DONE_YET
+
+from supervisor.options import VERSION
+from supervisor.options import make_namespec
+from supervisor.options import split_namespec
+
+from supervisor.xmlrpc import SystemNamespaceRPCInterface
+from supervisor.xmlrpc import RootRPCInterface
+from supervisor.xmlrpc import Faults
+from supervisor.xmlrpc import RPCError
+
 from supervisor.rpcinterface import SupervisorNamespaceRPCInterface
-from supervisor.xmlrpc import (
-    Faults,
-    RPCError,
-    RootRPCInterface,
-    SystemNamespaceRPCInterface
-)
 
 
 class DeferredWebProducer(object):
@@ -161,7 +162,7 @@ class ViewContext(object):
 
 
 class MeldView(object):
-    content_type = 'text/html'
+    content_type = 'text/html;charset=utf-8'
     delay = .5
 
     def __init__(self, context):
@@ -346,96 +347,104 @@ class StatusView(MeldView):
                 if process is None:
                     return wrong
 
+                if action == 'start':
+                    try:
+                        bool_or_callback = (
+                            rpcinterface.supervisor.startProcess(namespec)
+                            )
+                    except RPCError as e:
+                        if e.code == Faults.NO_FILE:
+                            msg = 'no such file'
+                        elif e.code == Faults.NOT_EXECUTABLE:
+                            msg = 'file not executable'
+                        elif e.code == Faults.ALREADY_STARTED:
+                            msg = 'already started'
+                        elif e.code == Faults.SPAWN_ERROR:
+                            msg = 'spawn error'
+                        elif e.code == Faults.ABNORMAL_TERMINATION:
+                            msg = 'abnormal termination'
+                        else:
+                            msg = 'unexpected rpc fault [%d] %s' % (
+                                e.code, e.text)
+
+                        def starterr():
+                            return 'ERROR: Process %s: %s' % (namespec, msg)
+                        starterr.delay = 0.05
+                        return starterr
+
+                    if callable(bool_or_callback):
+                        def startprocess():
+                            try:
+                                result = bool_or_callback()
+                            except RPCError as e:
+                                if e.code == Faults.SPAWN_ERROR:
+                                    msg = 'spawn error'
+                                elif e.code == Faults.ABNORMAL_TERMINATION:
+                                    msg = 'abnormal termination'
+                                else:
+                                    msg = 'unexpected rpc fault [%d] %s' % (
+                                        e.code, e.text)
+                                return 'ERROR: Process %s: %s' % (namespec, msg)
+
+                            if result is NOT_DONE_YET:
+                                return NOT_DONE_YET
+                            return 'Process %s started' % namespec
+                        startprocess.delay = 0.05
+                        return startprocess
+                    else:
+                        def startdone():
+                            return 'Process %s started' % namespec
+                        startdone.delay = 0.05
+                        return startdone
+
                 elif action == 'stop':
                     try:
-                        callback = rpcinterface.supervisor.stopProcess(namespec)
-                    except RPCError as exc:
-                        code = exc.code
-                        text = exc.text
+                        bool_or_callback = (
+                            rpcinterface.supervisor.stopProcess(namespec)
+                            )
+                    except RPCError as e:
+                        msg = 'unexpected rpc fault [%d] %s' % (e.code, e.text)
                         def stoperr():
-                            return 'unexpected rpc fault [%d] %s' % (code, text)
+                            return msg
                         stoperr.delay = 0.05
                         return stoperr
 
-                    def stopprocess():
-                        try:
-                            if callable(callback):
-                                result = callback()
-                            else:
-                                result = callback
-                        except RPCError as e:
-                            return 'unexpected rpc fault [%d] %s' % (e.code, e.text)
-
-                        if result is NOT_DONE_YET:
-                            return NOT_DONE_YET
-                        return 'Process %s stopped' % namespec
-                    stopprocess.delay = 0.05
-                    return stopprocess
+                    if callable(bool_or_callback):
+                        def stopprocess():
+                            try:
+                                result = bool_or_callback()
+                            except RPCError as e:
+                                return 'unexpected rpc fault [%d] %s' % (
+                                    e.code, e.text)
+                            if result is NOT_DONE_YET:
+                                return NOT_DONE_YET
+                            return 'Process %s stopped' % namespec
+                        stopprocess.delay = 0.05
+                        return stopprocess
+                    else:
+                        def stopdone():
+                            return 'Process %s stopped' % namespec
+                        stopdone.delay = 0.05
+                        return stopdone
 
                 elif action == 'restart':
                     callback = rpcinterface.supervisor.restartProcess(namespec)
-
                     def restartprocess():
                         result = callback()
                         if result is NOT_DONE_YET:
                             return NOT_DONE_YET
                         return 'Process %s restarted' % namespec
-
                     restartprocess.delay = 0.05
                     return restartprocess
 
-                elif action == 'start':
-                    try:
-                        callback = rpcinterface.supervisor.startProcess( namespec)
-                    except RPCError as exc:
-                        if exc.code == Faults.NO_FILE:
-                            msg = 'no such file'
-                        elif exc.code == Faults.NOT_EXECUTABLE:
-                            msg = 'file not executable'
-                        elif exc.code == Faults.ALREADY_STARTED:
-                            msg = 'already started'
-                        elif exc.code == Faults.SPAWN_ERROR:
-                            msg = 'spawn error'
-                        elif exc.code == Faults.ABNORMAL_TERMINATION:
-                            msg = 'abnormal termination'
-                        else:
-                            msg = 'unexpected rpc fault [%d] %s' % (exc.code, exc.text)
-                        def starterr():
-                            return 'ERROR: Process %s: %s' % (namespec, msg)
-
-                        starterr.delay = 0.05
-                        return starterr
-
-                    def startprocess():
-                        try:
-                            if isinstance(callback, types.FunctionType):
-                                result = callback()
-                            else:
-                                result = callback
-                        except RPCError as exc:
-                            if exc.code == Faults.SPAWN_ERROR:
-                                msg = 'spawn error'
-                            elif exc.code == Faults.ABNORMAL_TERMINATION:
-                                msg = 'abnormal termination'
-                            else:
-                                msg = 'unexpected rpc fault [%d] %s' % (exc.code, exc.text)
-                            return 'ERROR: Process %s: %s' % (namespec, msg)
-
-                        if result is NOT_DONE_YET:
-                            return NOT_DONE_YET
-                        return 'Process %s started' % namespec
-
-                    startprocess.delay = 0.05
-                    return startprocess
-
                 elif action == 'clearlog':
                     try:
-                        callback = rpcinterface.supervisor.clearProcessLogs(namespec)
-                    except RPCError as exc:
-                        code = exc.code
-                        text = exc.text
+                        callback = rpcinterface.supervisor.clearProcessLogs(
+                            namespec)
+                    except RPCError as e:
+                        msg = 'unexpected rpc fault [%d] %s' % (e.code, e.text)
                         def clearerr():
-                            return 'unexpected rpc fault [%d] %s' % (code, text)
+                            return msg
                         clearerr.delay = 0.05
                         return clearerr
 

@@ -2,8 +2,6 @@ from __future__ import absolute_import
 
 import sys
 
-PY2 = sys.version_info[0] == 2
-
 
 class _Stream(object):
     def __init__(self, value, obj):
@@ -18,6 +16,7 @@ class _Stream(object):
         return self.value if isinstance(self.value, self.obj) else \
             self.value.decode(encoding, 'ignore' if ignore else 'strict')
 
+PY2 = sys.version_info[0] == 2
 
 if PY2:  # pragma: no cover
     long = long
@@ -30,9 +29,6 @@ if PY2:  # pragma: no cover
 
     def as_string(s, encoding='utf-8', ignore=False):
         return _Stream(s, unicode).decode(encoding=encoding, ignore=ignore)
-
-    reduce = reduce
-
 
     def is_text_stream(stream):
         try:
@@ -60,12 +56,6 @@ else: # pragma: no cover
     def is_text_stream(stream):
         import _io
         return isinstance(stream, _io._TextIOBase)
-
-try: # pragma: no cover
-    from subprocess import SubprocessError
-except ImportError:
-    class SubprocessError(Exception):
-        pass
 
 try:  # pragma: no cover
     import xmlrpc.client as xmlrpclib
@@ -144,3 +134,9 @@ try: # pragma: no cover
     from html import escape
 except ImportError: # pragma: no cover
     from cgi import escape
+
+try: # pragma: no cover
+    from subprocess import SubprocessError
+except ImportError:
+    class SubprocessError(Exception):
+        pass

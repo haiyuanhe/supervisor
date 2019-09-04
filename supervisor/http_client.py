@@ -1,7 +1,8 @@
 # this code based on Daniel Krech's RDFLib HTTP client code (see rdflib.net)
+
 import re
-import socket
 import sys
+import socket
 
 from supervisor.compat import as_bytes
 from supervisor.compat import as_string

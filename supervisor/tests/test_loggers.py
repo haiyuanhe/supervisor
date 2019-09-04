@@ -6,8 +6,8 @@ import sys
 import tempfile
 import unittest
 
-from supervisor.compat import PY2
 from supervisor.compat import as_bytes
+from supervisor.compat import PY2
 from supervisor.compat import as_string
 from supervisor.compat import StringIO
 from supervisor.compat import unicode
@@ -111,13 +111,13 @@ class BareHandlerTests(HandlerTests, unittest.TestCase):
         self.assertEqual(stream.flushed, True)
         self.assertEqual(stream.written, b'foo')
 
-    # def test_emit_unicode_error(self):
-    #     stream = DummyStream(error=UnicodeError)
-    #     inst = self._makeOne(stream=stream)
-    #     record = self._makeLogRecord(b'foo')
-    #     inst.emit(record)
-    #     self.assertEqual(stream.flushed, True)
-    #     self.assertEqual(stream.written, b'foo')
+    def test_emit_unicode_error(self):
+        stream = DummyStream(error=None)
+        inst = self._makeOne(stream=stream)
+        record = self._makeLogRecord(b'foo')
+        inst.emit(record)
+        self.assertEqual(stream.flushed, True)
+        self.assertEqual(stream.written, b'foo')
 
     def test_emit_other_error(self):
         stream = DummyStream(error=ValueError)
@@ -128,7 +128,6 @@ class BareHandlerTests(HandlerTests, unittest.TestCase):
         inst.emit(record)
         self.assertEqual(stream.flushed, False)
         self.assertEqual(stream.written, b'')
-
 
 class FileHandlerTests(HandlerTests, unittest.TestCase):
     def _getTargetClass(self):
@@ -229,25 +228,6 @@ class FileHandlerTests(HandlerTests, unittest.TestCase):
 
         self.assertTrue(dummy_stderr.written.endswith(b'OSError\n'),
                         dummy_stderr.written)
-
-
-if os.path.exists('/dev/stdout'):
-    StdoutTestsBase = FileHandlerTests
-else:
-    # Skip the stdout tests on platforms that don't have /dev/stdout.
-    StdoutTestsBase = object
-
-
-class StdoutTests(StdoutTestsBase):
-    def test_ctor_with_dev_stdout(self):
-        handler = self._makeOne('/dev/stdout')
-        # Modes 'w' and 'a' have the same semantics when applied to
-        # character device files and fifos.
-        self.assertTrue(handler.mode in ['wb', 'ab'], handler.mode)
-        self.assertEqual(handler.baseFilename, '/dev/stdout')
-        self.assertEqual(handler.stream.name, '/dev/stdout')
-        handler.close()
-
 
 class RotatingFileHandlerTests(FileHandlerTests):
 
@@ -422,7 +402,6 @@ class BoundIOTests(unittest.TestCase):
         io = self._makeOne(1, b'a')
         io.close()
         self.assertEqual(io.buf, b'')
-
 
 class LoggerTests(unittest.TestCase):
     def _getTargetClass(self):
@@ -611,7 +590,6 @@ class SyslogHandlerTests(HandlerTests, unittest.TestCase):
             record = self._makeLogRecord('fií')
             handler.emit(record)
             self.assertEqual(called, ['fií'])
-
 
 class DummyHandler:
     close = False

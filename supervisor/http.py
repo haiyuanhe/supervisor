@@ -1,20 +1,19 @@
+import os
+import stat
+import time
+import sys
 import codecs
 import errno
-import os
 import socket
-import stat
-import sys
-import time
+import socket
+import errno
 import weakref
 import traceback
 
 from supervisor import loggers
-
-from supervisor.compat import (
-    urllib,
-    sha1,
-    as_bytes
-)
+from supervisor.compat import urllib
+from supervisor.compat import sha1
+from supervisor.compat import as_bytes
 from supervisor.compat import as_string
 from supervisor.medusa import asyncore_25 as asyncore
 from supervisor.medusa import http_date
@@ -340,29 +339,18 @@ class deferring_http_channel(http_server.http_channel):
     # order to spew tail -f output faster (speculative)
     ac_out_buffer_size = 4096
 
-    delay = False
-    writable_check = time.time()
-    _zombie_timeout = 10
+    delay = 0 # seconds
+    last_writable_check = 0 # timestamp of last writable check; 0 if never
 
-    def recv(self, buffer_size):
-        try:
-            return super(deferring_http_channel, self).recv(buffer_size)
-        except socket.error as why:
-            if why[0] == errno.EWOULDBLOCK:
-                if (time.time() - self.creation_time) > self._zombie_timeout:
-                    self.close()
-                return ''
-            else:
-                raise
+    def writable(self, now=None):
+        if now is None:  # for unit tests
+            now = time.time()
 
-    def writable(self, t=time.time):
-        now = t()
         if self.delay:
             # we called a deferred producer via this channel (see refill_buffer)
-            last_writable_check = self.writable_check
-            elapsed = now - last_writable_check
-            if elapsed > self.delay:
-                self.writable_check = now
+            elapsed = now - self.last_writable_check
+            if (elapsed > self.delay) or (elapsed < 0):
+                self.last_writable_check = now
                 return True
             else:
                 return False
@@ -409,7 +397,7 @@ class deferring_http_channel(http_server.http_channel):
             self.current_request.found_terminator()
         else:
             # we convert the header to text to facilitate processing.
-            # some of the underlying APIs (such as urllib.splitquery)
+            # some of the underlying APIs (such as splitquery)
             # expect text rather than bytes.
             header = as_string(self.in_buffer)
             self.in_buffer = b''
@@ -793,7 +781,7 @@ class logtail_handler(object):
 
         mtime = os.stat(logfile)[stat.ST_MTIME]
         request['Last-Modified'] = http_date.build_http_date(mtime)
-        request['Content-Type'] = 'text/plain'
+        request['Content-Type'] = 'text/plain;charset=utf-8'
         # the lack of a Content-Length header makes the outputter
         # send a 'Transfer-Encoding: chunked' response
 
@@ -825,7 +813,7 @@ class mainlogtail_handler(object):
 
         mtime = os.stat(logfile)[stat.ST_MTIME]
         request['Last-Modified'] = http_date.build_http_date(mtime)
-        request['Content-Type'] = 'text/plain'
+        request['Content-Type'] = 'text/plain;charset=utf-8'
         # the lack of a Content-Length header makes the outputter
         # send a 'Transfer-Encoding: chunked' response
 

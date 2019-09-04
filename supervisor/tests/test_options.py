@@ -19,6 +19,7 @@ from supervisor.options import FastCGIGroupConfig
 
 from supervisor.tests.base import DummyLogger
 from supervisor.tests.base import DummyOptions
+from supervisor.tests.base import DummyPoller
 from supervisor.tests.base import DummyPConfig
 from supervisor.tests.base import DummyProcess
 from supervisor.tests.base import DummySocketConfig
@@ -166,10 +167,13 @@ class OptionTests(unittest.TestCase):
 
     def test_searchpaths(self):
         options = self._makeOptions()
-        self.assertEqual(len(options.searchpaths), 5)
-        self.assertTrue('supervisord.conf' in options.searchpaths)
-        self.assertTrue('etc/supervisord.conf' in options.searchpaths)
-        self.assertTrue('/etc/supervisord.conf' in options.searchpaths)
+        self.assertEqual(len(options.searchpaths), 6)
+        self.assertEqual(options.searchpaths[-4:], [
+            'supervisord.conf',
+            'etc/supervisord.conf',
+            '/etc/supervisord.conf',
+            '/etc/supervisor/supervisord.conf',
+            ])
 
     def test_options_and_args_order(self):
         # Only config file exists
@@ -370,6 +374,28 @@ class ClientOptionsTests(unittest.TestCase):
         self.assertEqual(options.username, 'someuser')
         self.assertEqual(options.password, 'passwordhere')
         self.assertEqual(options.history_file, 'E:\\path\\to\\histdir\\.supervisorctl.hist')
+
+    def test_options_supervisorctl_section_expands_here(self):
+        instance = self._makeOne()
+        text = lstrip('''
+        [supervisorctl]
+        history_file=%(here)s/sc_history
+        serverurl=unix://%(here)s/supervisord.sock
+        ''')
+        here = tempfile.mkdtemp()
+        supervisord_conf = os.path.join(here, 'supervisord.conf')
+        with open(supervisord_conf, 'w') as f:
+            f.write(text)
+        try:
+            instance.configfile = supervisord_conf
+            instance.realize(args=[])
+        finally:
+            shutil.rmtree(here, ignore_errors=True)
+        options = instance.configroot.supervisorctl
+        self.assertEqual(options.history_file,
+           os.path.join(here, 'sc_history'))
+        self.assertEqual(options.serverurl,
+           'unix://' + os.path.join(here, 'supervisord.sock'))
 
     def test_read_config_not_found(self):
         nonexistent = os.path.join(os.path.dirname(__file__), 'nonexistent')
@@ -785,10 +811,12 @@ class ServerOptionsTests(unittest.TestCase):
         self.assertEqual(proc.name, 'three')
         self.assertEqual(proc.command, '/bin/pig')
 
-    def test_reload_clears_parse_warnings(self):
+    def test_reload_clears_parse_messages(self):
         instance = self._makeOne()
-        old_warning = "Warning from a prior config read"
-        instance.parse_warnings = [old_warning]
+        old_msg = "Message from a prior config read"
+        instance.parse_criticals = [old_msg]
+        instance.parse_warnings = [old_msg]
+        instance.parse_infos = [old_msg]
 
         text = lstrip("""\
         [supervisord]
@@ -799,7 +827,25 @@ class ServerOptionsTests(unittest.TestCase):
         """)
         instance.configfile = StringIO(text)
         instance.realize(args=[])
-        self.assertFalse(old_warning in instance.parse_warnings)
+        self.assertFalse(old_msg in instance.parse_criticals)
+        self.assertFalse(old_msg in instance.parse_warnings)
+        self.assertFalse(old_msg in instance.parse_infos)
+
+    def test_reload_clears_parse_infos(self):
+        instance = self._makeOne()
+        old_info = "Info from a prior config read"
+        instance.infos = [old_info]
+
+        text = lstrip("""\
+        [supervisord]
+        user=root
+
+        [program:cat]
+        command = /bin/cat
+        """)
+        instance.configfile = StringIO(text)
+        instance.realize(args=[])
+        self.assertFalse(old_info in instance.parse_infos)
 
     def test_reload_clears_parse_infos(self):
         instance = self._makeOne()
@@ -1017,6 +1063,8 @@ class ServerOptionsTests(unittest.TestCase):
             shutil.rmtree(dirname, ignore_errors=True)
         options = instance.configroot.supervisord
         self.assertEqual(len(options.server_configs), 1)
+        msg = 'Included extra file "%s" during parsing' % conf_file
+        self.assertTrue(msg in instance.parse_infos)
 
     def test_read_config_include_expands_here(self):
         conf = os.path.join(
@@ -1138,8 +1186,10 @@ class ServerOptionsTests(unittest.TestCase):
             self.fail("nothing raised")
         except ValueError as exc:
             self.assertEqual(exc.args[0],
-                             "Must specify username if password is specified "
-                             "in [inet_http_server]")
+                             'Section [inet_http_server] contains incomplete '
+                'authentication: If a username or a password is '
+                'specified, both the username and password must '
+                             'be specified')
 
     def test_options_afinet_no_port(self):
         instance = self._makeOne()
@@ -1164,6 +1214,9 @@ class ServerOptionsTests(unittest.TestCase):
                 f.write('2')
             instance = self._makeOne()
             instance.pidfile = pidfile
+            instance.logger = DummyLogger()
+            instance.write_pidfile()
+            self.assertTrue(instance.unlink_pidfile)
             instance.cleanup()
             self.assertFalse(os.path.exists(pidfile))
         finally:
@@ -1177,6 +1230,46 @@ class ServerOptionsTests(unittest.TestCase):
         instance = self._makeOne()
         instance.pidfile = notfound
         instance.cleanup()  # shouldn't raise
+
+    def test_cleanup_does_not_remove_pidfile_from_another_supervisord(self):
+        pidfile = tempfile.mktemp()
+
+        with open(pidfile, 'w') as f:
+            f.write('1234')
+
+        try:
+            instance = self._makeOne()
+            # pidfile exists but unlink_pidfile indicates we did not write it.
+            # pidfile must be from another instance of supervisord and
+            # shouldn't be removed.
+            instance.pidfile = pidfile
+            self.assertFalse(instance.unlink_pidfile)
+            instance.cleanup()
+            self.assertTrue(os.path.exists(pidfile))
+        finally:
+            try:
+                os.unlink(pidfile)
+            except OSError:
+                pass
+
+    def test_cleanup_closes_poller(self):
+        pidfile = tempfile.mktemp()
+        try:
+            with open(pidfile, 'w') as f:
+                f.write('2')
+            instance = self._makeOne()
+            instance.pidfile = pidfile
+
+            poller = DummyPoller({})
+            instance.poller = poller
+            self.assertFalse(poller.closed)
+            instance.cleanup()
+            self.assertTrue(poller.closed)
+        finally:
+            try:
+                os.unlink(pidfile)
+            except OSError:
+                pass
 
     def test_cleanup_fds_closes_5_upto_minfds_ignores_oserror(self):
         instance = self._makeOne()
@@ -1289,6 +1382,7 @@ class ServerOptionsTests(unittest.TestCase):
             self.assertEqual(pid, os.getpid())
             msg = instance.logger.data[0]
             self.assertTrue(msg.startswith('supervisord started with pid'))
+            self.assertTrue(instance.unlink_pidfile)
         finally:
             try:
                 os.unlink(fn)
@@ -1303,6 +1397,7 @@ class ServerOptionsTests(unittest.TestCase):
         instance.write_pidfile()
         msg = instance.logger.data[0]
         self.assertTrue(msg.startswith('could not write pidfile'))
+        self.assertFalse(instance.unlink_pidfile)
 
     def test_close_fd(self):
         instance = self._makeOne()
@@ -1613,7 +1708,7 @@ class ServerOptionsTests(unittest.TestCase):
 
     def test_options_supervisord_section_expands_here(self):
         instance = self._makeOne()
-        text = lstrip('''\
+        text = lstrip('''
         [supervisord]
         childlogdir=%(here)s
         directory=%(here)s
@@ -2114,6 +2209,24 @@ class ServerOptionsTests(unittest.TestCase):
         self.assertEqual(dog1.command, '/bin/dog')
         self.assertEqual(dog1.priority, 1)
 
+    def test_event_listener_pool_disallows_buffer_size_zero(self):
+        text = lstrip("""\
+        [eventlistener:dog]
+        events=EVENT
+        command = /bin/dog
+        buffer_size = 0
+        """)
+        from supervisor.options import UnhosedConfigParser
+        config = UnhosedConfigParser()
+        config.read_string(text)
+        instance = self._makeOne()
+        try:
+            instance.process_groups_from_parser(config)
+            self.fail('nothing raised')
+        except ValueError as exc:
+            self.assertEqual(exc.args[0], '[eventlistener:dog] section sets '
+                'invalid buffer_size (0)')
+
     def test_event_listener_pool_disallows_redirect_stderr(self):
         text = lstrip("""\
         [eventlistener:dog]
@@ -2262,6 +2375,7 @@ class ServerOptionsTests(unittest.TestCase):
         text = lstrip("""\
         [fcgi-program:foo]
         socket = tcp://localhost:%(ENV_SERVER_PORT)s
+        socket_backlog = %(ENV_FOO_SOCKET_BACKLOG)s
         process_name = %(ENV_FOO_PROCESS_PREFIX)s_%(program_name)s_%(process_num)s
         command = /bin/foo --arg1=%(ENV_FOO_COMMAND_ARG1)s
         numprocs = %(ENV_FOO_NUMPROCS)s
@@ -2418,6 +2532,19 @@ class ServerOptionsTests(unittest.TestCase):
         config.read_string(text)
         instance = self._makeOne()
         self.assertRaises(ValueError, instance.process_groups_from_parser, config)
+
+    def test_fcgi_program_bad_socket_backlog(self):
+        text = lstrip("""\
+        [fcgi-program:foo]
+        socket = unix:///tmp/foo.sock
+        socket_backlog = -1
+        command = /bin/foo
+        """)
+        from supervisor.options import UnhosedConfigParser
+        config = UnhosedConfigParser()
+        config.read_string(text)
+        instance = self._makeOne()
+        self.assertRaises(ValueError,instance.process_groups_from_parser,config)
 
     def test_heterogeneous_process_groups_from_parser(self):
         text = lstrip("""\
@@ -2797,7 +2924,7 @@ class ServerOptionsTests(unittest.TestCase):
         self.assertRaises(OverflowError,
                           instance.openhttpservers, supervisord)
 
-    def test_dropPrivileges_user_none(self):
+    def test_drop_privileges_user_none(self):
         instance = self._makeOne()
         self.assertRaises(NotImplementedError,
                           instance.dropPrivileges,

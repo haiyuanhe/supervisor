@@ -1,9 +1,7 @@
-include CHANGES.txt
-include CONTRIBUTORS.txt
+include CHANGES.rst
 include COPYRIGHT.txt
 include LICENSES.txt
 include README.rst
-include TODO.txt
 include tox.ini
 include supervisor/version.txt
 include supervisor/scripts/*.py

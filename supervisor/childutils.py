@@ -1,11 +1,12 @@
 import sys
 import time
 
-from supervisor.compat import (
-    as_string,
-    xmlrpclib,
-    long
-)
+from supervisor.compat import xmlrpclib
+from supervisor.compat import long
+from supervisor.compat import as_string
+
+from supervisor.xmlrpc import SupervisorTransport
+from supervisor.events import ProcessCommunicationEvent
 from supervisor.dispatchers import PEventListenerDispatcher
 from supervisor.events import ProcessCommunicationEvent
 from supervisor.xmlrpc import SupervisorTransport

@@ -1,15 +1,15 @@
-import os
-import sys
 import tempfile
 import unittest
+import os
+import sys
 
-from supervisor.tests.base import DummyEvent
-from supervisor.tests.base import DummyLogger
 from supervisor.compat import as_bytes
 
 from supervisor.tests.base import DummyOptions
-from supervisor.tests.base import DummyPConfig
 from supervisor.tests.base import DummyProcess
+from supervisor.tests.base import DummyPConfig
+from supervisor.tests.base import DummyLogger
+from supervisor.tests.base import DummyEvent
 
 
 class PDispatcherTests(unittest.TestCase):
@@ -586,7 +586,7 @@ class PInputDispatcherTests(unittest.TestCase):
         process = DummyProcess(config)
         dispatcher = self._makeOne(process)
         self.assertEqual(dispatcher.input_buffer, b'')
-        dispatcher.handle_write_event
+        dispatcher.handle_write_event()
         self.assertEqual(dispatcher.input_buffer, b'')
         self.assertEqual(options.written, {})
 

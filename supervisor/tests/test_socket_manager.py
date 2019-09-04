@@ -195,11 +195,11 @@ class SocketManagerTest(unittest.TestCase):
         self.assertTrue(sock_manager.is_prepared())
         self.assertFalse(sock.bind_called)
         self.assertTrue(sock.listen_called)
-        self.assertEqual(sock.listen_backlog, socket.SOMAXCONN)
+        self.assertEqual(sock.listen_backlog, 128)
         self.assertFalse(sock.close_called)
 
     def test_tcp_socket_already_taken(self):
-        conf = InetStreamSocketConfig('127.0.0.1', 51041)
+        conf = InetStreamSocketConfig('127.0.0.1', 51041, so_reuse_addr=False)
         sock_manager = self._makeOne(conf)
         sock = sock_manager.get_socket()
         sock_manager2 = self._makeOne(conf)

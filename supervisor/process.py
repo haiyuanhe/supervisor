@@ -518,6 +518,9 @@ class Subprocess(object):
         """ Log a 'waiting for x to stop' message with throttling. """
         if self.state == ProcessStates.STOPPING:
             now = time.time()
+
+            self._check_and_adjust_for_system_clock_rollback(now)
+
             if now > (self.laststopreport + 2): # every 2 seconds
                 self.config.options.logger.info(
                     'waiting for %s to stop' % as_string(self.config.name))
@@ -637,9 +640,7 @@ class Subprocess(object):
         except ValueError as e:  # signal not supported
             msg = 'problem sending sig %s (%s): %s' % (
                 self.config.name, self.pid, str(e))
-            io = StringIO()
-            traceback.print_exc(file=io)
-            tb = io.getvalue()
+            tb = traceback.format_exc()
             options.logger.error(tb)
             return msg
         except:
@@ -665,7 +666,7 @@ class Subprocess(object):
         self.laststop = now
         processname = as_string(self.config.name)
 
-        if now >= self.laststart:
+        if now > self.laststart:
             too_quickly = now - self.laststart < self.config.startsecs
         else:
             too_quickly = False
@@ -742,7 +743,7 @@ class Subprocess(object):
     def set_uid(self):
         if self.config.uid is None:
             return
-        msg = self.config.options.dropPrivileges(self.config.uid)
+        msg = self.config.options.drop_privileges(self.config.uid)
         return msg
 
     def __lt__(self, other):
@@ -769,6 +770,8 @@ class Subprocess(object):
     def transition(self):
         now = time.time()
         state = self.state
+
+        self._check_and_adjust_for_system_clock_rollback(now)
 
         logger = self.config.options.logger
 
@@ -1010,6 +1013,12 @@ class EventListenerPool(ProcessGroupBase):
         if dispatch_capable:
             if self.dispatch_throttle:
                 now = time.time()
+
+                if now < self.last_dispatch:
+                    # The system clock appears to have moved backward
+                    # Reset self.last_dispatch accordingly
+                    self.last_dispatch = now
+
                 if now - self.last_dispatch < self.dispatch_throttle:
                     return
             self.dispatch()

@@ -17,12 +17,16 @@ class ProcessOrGroupName(unittest.TestCase):
         name = " foo\t"
         self.assertEqual(self._callFUT(name), "foo")
 
-    def test_disallows_inner_spaces(self):
+    def test_disallows_inner_spaces_for_eventlister_protocol(self):
         name = "foo bar"
         self.assertRaises(ValueError, self._callFUT, name)
 
-    def test_disallows_colons(self):
+    def test_disallows_colons_for_eventlistener_protocol(self):
         name = "foo:bar"
+        self.assertRaises(ValueError, self._callFUT, name)
+
+    def test_disallows_slashes_for_web_ui_urls(self):
+        name = "foo/bar"
         self.assertRaises(ValueError, self._callFUT, name)
 
 
@@ -164,14 +168,14 @@ class DictOfKeyValuePairsTests(unittest.TestCase):
         expected = {'foo': 'a\nb\nc'}
         self.assertEqual(actual, expected)
 
-    def test_handles_quotes_inside_quotes(self):
-        actual = datatypes.dict_of_key_value_pairs('foo="\'\\""')
-        expected = {'foo': '\'"'}
-        self.assertEqual(actual, expected)
-
     def test_handles_empty_inside_quotes(self):
         actual = datatypes.dict_of_key_value_pairs('foo=""')
         expected = {'foo': ''}
+        self.assertEqual(actual, expected)
+
+    def test_handles_empty_inside_quotes_with_second_unquoted_pair(self):
+        actual = datatypes.dict_of_key_value_pairs('foo="",bar=a')
+        expected = {'foo': '', 'bar': 'a'}
         self.assertEqual(actual, expected)
 
     def test_handles_unquoted_non_alphanum(self):
@@ -335,7 +339,7 @@ class ExistingDirpathTests(unittest.TestCase):
             self.fail()
         except ValueError as e:
             expected = ('The directory named as part of the path %s '
-                        'does not exist.' % path)
+                        'does not exist' % path)
             self.assertEqual(e.args[0], expected)
 
     def test_raises_if_exists_but_not_a_dir(self):
@@ -346,7 +350,7 @@ class ExistingDirpathTests(unittest.TestCase):
             self.fail()
         except ValueError as e:
             expected = ('The directory named as part of the path %s '
-                        'does not exist.' % path)
+                        'does not exist' % path)
             self.assertEqual(e.args[0], expected)
 
     def test_expands_home(self):

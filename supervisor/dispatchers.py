@@ -1,18 +1,16 @@
-import errno
 import warnings
-
-from supervisor import loggers
-from supervisor.events import (
-    notify,
-    as_string,
-    EventRejectedEvent,
-    ProcessLogStderrEvent,
-    ProcessLogStdoutEvent
-)
+import errno
 from supervisor.medusa.asyncore_25 import compact_traceback
+
+from supervisor.compat import as_string
+from supervisor.events import notify
+from supervisor.events import EventRejectedEvent
+from supervisor.events import ProcessLogStderrEvent
+from supervisor.events import ProcessLogStdoutEvent
 from supervisor.states import EventListenerStates
 from supervisor.states import getEventListenerStateDescription
-
+from supervisor.states import getEventListenerStateDescription
+from supervisor import loggers
 
 def find_prefix_at_end(haystack, needle):
     l = len(needle) - 1
@@ -344,8 +342,9 @@ class PEventListenerDispatcher(PLogDispatcher):
         # the initial state of our listener is ACKNOWLEDGED; this is a
         # "busy" state that implies we're awaiting a READY_FOR_EVENTS_TOKEN
         self.process.listener_state = EventListenerStates.ACKNOWLEDGED
-        self.process.event = self.resultlen = None
+        self.process.event = None
         self.result = b''
+        self.resultlen = None
 
         logfile = getattr(process.config, '%s_logfile' % channel)
 
@@ -521,20 +520,6 @@ class PEventListenerDispatcher(PLogDispatcher):
             process.config.options.logger.warn(msg)
 
 
-class PStreamEventListenerDispatcher(PEventListenerDispatcher):
-
-    def __init__(self, process, channel, fd):
-        super(PStreamEventListenerDispatcher, self).__init__(process, channel, fd)
-        self.fd.start()
-
-    def close(self):
-        try:
-            super(PStreamEventListenerDispatcher, self).close()
-        finally:
-            if self.fd.is_alive():
-                self.fd.close()
-
-
 class PInputDispatcher(PDispatcher):
     """ Input (stdin) dispatcher """
 
@@ -575,10 +560,24 @@ class PInputDispatcher(PDispatcher):
                     raise
 
 
+
+class PStreamEventListenerDispatcher(PEventListenerDispatcher):
+
+    def __init__(self, process, channel, fd):
+        super(PStreamEventListenerDispatcher, self).__init__(process, channel, fd)
+        self.fd.start()
+
+    def close(self):
+        try:
+            super(PStreamEventListenerDispatcher, self).close()
+        finally:
+            if self.fd.is_alive():
+                self.fd.close()
+
+
 ANSI_ESCAPE_BEGIN = b'\x1b['
 ANSI_TERMINATORS = (b'H', b'f', b'A', b'B', b'C', b'D', b'R', b's', b'u', b'J',
                     b'K', b'h', b'l', b'p', b'm')
-
 
 def stripEscapes(s):
     """

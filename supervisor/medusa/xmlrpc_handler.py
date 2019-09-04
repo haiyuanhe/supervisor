@@ -5,19 +5,17 @@
 
 # Based on "xmlrpcserver.py" by Fredrik Lundh (fredrik@pythonware.com)
 
-import sys
+VERSION = "$Id: xmlrpc_handler.py,v 1.6 2004/04/21 14:09:24 akuchling Exp $"
 
 from supervisor.compat import as_string
 
 import supervisor.medusa.http_server as http_server
-
 try:
     import xmlrpclib
 except ImportError:
     import xmlrpc.client as xmlrpclib
 
-
-VERSION = "$Id: xmlrpc_handler.py,v 1.6 2004/04/21 14:09:24 akuchling Exp $"
+import sys
 
 
 class xmlrpc_handler(object):
@@ -91,7 +89,6 @@ class collector(object):
         # convert the data back to text for processing
         data = as_string(b''.join(self.data))
         self.handler.continue_request(data, self.request)
-
 
 if __name__ == '__main__':
     class rpc_demo(xmlrpc_handler):

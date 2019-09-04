@@ -6,15 +6,14 @@ import tempfile
 import time
 import unittest
 
-from supervisor.states import ProcessStates
 from supervisor.states import SupervisorStates
 
-from supervisor.tests.base import DummyDispatcher
 from supervisor.tests.base import DummyOptions
 from supervisor.tests.base import DummyPConfig
 from supervisor.tests.base import DummyPGroupConfig
 from supervisor.tests.base import DummyProcess
 from supervisor.tests.base import DummyProcessGroup
+from supervisor.tests.base import DummyDispatcher
 
 from supervisor.compat import StringIO
 
@@ -46,7 +45,7 @@ class EntryPointTests(unittest.TestCase):
             sys.stdout = old_stdout
             shutil.rmtree(tempdir)
         output = new_stdout.getvalue()
-        self.assertTrue(output.find('supervisord started') != 1, output)
+        self.assertTrue('supervisord started' in output, output)
 
     if pstats:
         def test_main_profile(self):
@@ -68,8 +67,7 @@ class EntryPointTests(unittest.TestCase):
                 sys.stdout = old_stdout
                 shutil.rmtree(tempdir)
             output = new_stdout.getvalue()
-            self.assertTrue(output.find('cumulative time, call count') != -1,
-                            output)
+            self.assertTrue('cumulative time, call count' in output, output)
 
 
 class SupervisordTests(unittest.TestCase):
@@ -96,8 +94,9 @@ class SupervisordTests(unittest.TestCase):
         self.assertEqual(options.environment_processed, True)
         self.assertEqual(options.fds_cleaned_up, False)
         self.assertEqual(options.rlimits_set, True)
-        self.assertEqual(options.make_logger_messages,
-                         (['setuid_called'], [], ['rlimits_set']))
+        self.assertEqual(options.parse_criticals, ['setuid_called'])
+        self.assertEqual(options.parse_warnings, [])
+        self.assertEqual(options.parse_infos, ['rlimits_set'])
         self.assertEqual(options.autochildlogdir_cleared, True)
         self.assertEqual(len(supervisord.process_groups), 1)
         self.assertEqual(supervisord.process_groups['foo'].config.options,
@@ -121,8 +120,9 @@ class SupervisordTests(unittest.TestCase):
         self.assertEqual(options.environment_processed, True)
         self.assertEqual(options.fds_cleaned_up, True)
         self.assertFalse(hasattr(options, 'rlimits_set'))
-        self.assertEqual(options.make_logger_messages,
-                         (['setuid_called'], [], []))
+        self.assertEqual(options.parse_criticals, ['setuid_called'])
+        self.assertEqual(options.parse_warnings, [])
+        self.assertEqual(options.parse_infos, [])
         self.assertEqual(options.autochildlogdir_cleared, True)
         self.assertEqual(len(supervisord.process_groups), 1)
         self.assertEqual(supervisord.process_groups['foo'].config.options,
@@ -418,7 +418,7 @@ class SupervisordTests(unittest.TestCase):
         def make_gconfig(name, pconfigs, pool_events, result_handler='supervisor.dispatchers:default_handler'):
             return EventListenerPoolConfig(options, name, 25, pconfigs, 10, pool_events, result_handler)
 
-        # Test that changing an event listener command causes the diff_to_activate
+	    # Test that changing an event listener command causes the diff_to_activate
         pconfig = make_pconfig('process1', 'process1-new')
         econfig = make_econfig("TICK_60")
         group1 = make_gconfig('group1', [pconfig], econfig)
@@ -471,7 +471,7 @@ class SupervisordTests(unittest.TestCase):
         self.assertEqual([added, removed], [[], []])
         self.assertEqual(changed, [group1])
 
-	# Test that changing the result_handler triggers diff_to_activate
+        # Test that changing the result_handler triggers diff_to_activate
         options = DummyOptions()
         supervisord = self._makeOne(options)
 
@@ -498,7 +498,6 @@ class SupervisordTests(unittest.TestCase):
 
         self.assertEqual([added, removed], [[], []])
         self.assertEqual(changed, [group1])
-
 
     def test_add_process_group(self):
         options = DummyOptions()

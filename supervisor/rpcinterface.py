@@ -4,42 +4,42 @@ import os
 import time
 import types
 
-from supervisor.compat import (
-    as_string,
-    as_bytes,
-    unicode
-)
+from supervisor.compat import as_string
+from supervisor.compat import as_bytes
+from supervisor.compat import unicode
+
 from supervisor.datatypes import (
     Automatic,
     signal_number,
     )
-from supervisor.events import (
-    RemoteCommunicationEvent,
-    notify
-)
+
+from supervisor.options import readFile
+from supervisor.options import tailFile
+from supervisor.options import NotExecutable
+from supervisor.options import NotFound
+from supervisor.options import NoPermission
+from supervisor.options import make_namespec
+from supervisor.options import split_namespec
+from supervisor.options import VERSION
+
+from supervisor.events import notify
+from supervisor.events import RemoteCommunicationEvent
+
 from supervisor.http import NOT_DONE_YET
 from supervisor.xmlrpc import (
     capped_int,
     Faults,
     RPCError,
-)
-from supervisor.options import (
-    readFile,
-    tailFile,
-    NotExecutable,
-    NotFound,
-    NoPermission,
-    make_namespec,
-    split_namespec,
-    VERSION
-)
+    )
+
+from supervisor.states import SupervisorStates
+from supervisor.states import getSupervisorStateDescription
+from supervisor.states import ProcessStates
+from supervisor.states import getProcessStateDescription
 from supervisor.states import (
     RUNNING_STATES,
     STOPPED_STATES,
     ProcessStates,
-    SupervisorStates,
-    getProcessStateDescription,
-    getSupervisorStateDescription
 )
 from supervisor.xmlrpc import (
     Faults,
@@ -175,9 +175,19 @@ class SupervisorNamespaceRPCInterface(object):
 
     def reloadConfig(self):
         """
-        Reload configuration
+        Reload the configuration.
 
-        @return boolean result  always return True unless error
+        The result contains three arrays containing names of process
+        groups:
+
+        * `added` gives the process groups that have been added
+        * `changed` gives the process groups whose contents have
+          changed
+        * `removed` gives the process groups that are no longer
+          in the configuration
+
+        @return array result  [[added, changed, removed]]
+
         """
         self._update('reloadConfig')
         try:
@@ -616,6 +626,7 @@ class SupervisorNamespaceRPCInterface(object):
                      'stdout_logfile': pconfig.stdout_logfile,
                      'stdout_logfile_backups': pconfig.stdout_logfile_backups,
                      'stdout_logfile_maxbytes': pconfig.stdout_logfile_maxbytes,
+                     #'stdout_syslog': pconfig.stdout_syslog,
                      'stopsignal': int(pconfig.stopsignal), # enum on py3
                      'stopwaitsecs': pconfig.stopwaitsecs,
                      'stderr_capture_maxbytes': pconfig.stderr_capture_maxbytes,
@@ -623,6 +634,7 @@ class SupervisorNamespaceRPCInterface(object):
                      'stderr_logfile': pconfig.stderr_logfile,
                      'stderr_logfile_backups': pconfig.stderr_logfile_backups,
                      'stderr_logfile_maxbytes': pconfig.stderr_logfile_maxbytes,
+                     #'stderr_syslog': pconfig.stderr_syslog,
                     }
                 # no support for these types in xml-rpc
                 d.update((k, 'auto') for k, v in d.items() if v is Automatic)
@@ -641,7 +653,7 @@ class SupervisorNamespaceRPCInterface(object):
             start_dt = datetime.datetime(*time.gmtime(start)[:6])
             now_dt = datetime.datetime(*time.gmtime(now)[:6])
             uptime = now_dt - start_dt
-            if uptime.total_seconds() < 0: # system time set back
+            if _total_seconds(uptime) < 0: # system time set back
                 uptime = datetime.timedelta(0)
             desc = 'pid %s, uptime %s' % (info['pid'], uptime)
 
@@ -953,6 +965,9 @@ class SupervisorNamespaceRPCInterface(object):
 
         return True
 
+def _total_seconds(timedelta):
+    return ((timedelta.days * 86400 + timedelta.seconds) * 10**6 +
+                timedelta.microseconds) / 10**6
 
 def make_allfunc(processes, predicate, func, **extra_kwargs):
     """ Return a closure representing a function that calls a
@@ -1045,7 +1060,6 @@ def make_allfunc(processes, predicate, func, **extra_kwargs):
 
 def isRunning(process):
     return process.get_state() in RUNNING_STATES
-
 
 def isNotRunning(process):
     return not isRunning(process)

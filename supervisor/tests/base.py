@@ -7,6 +7,7 @@ import tempfile
 
 from supervisor.helpers import DummyPopen
 from functools import total_ordering
+
 from supervisor.compat import Fault
 from supervisor.compat import as_bytes
 
@@ -118,6 +119,7 @@ class DummyOptions:
         self.existing = []
         self.openreturn = None
         self.readfd_result = ''
+        self.parse_criticals = []
         self.parse_warnings = []
         self.parse_infos = []
         self.serverurl = 'http://localhost:9001'
@@ -151,13 +153,13 @@ class DummyOptions:
     def cleanup_fds(self):
         self.fds_cleaned_up = True
 
-    def set_rlimits(self):
+    def set_rlimits_or_exit(self):
         self.rlimits_set = True
-        return ['rlimits_set']
+        self.parse_infos.append('rlimits_set')
 
-    def set_uid(self):
+    def set_uid_or_exit(self):
         self.setuid_called = True
-        return 'setuid_called'
+        self.parse_criticals.append('setuid_called')
 
     def openhttpservers(self, supervisord):
         self.httpservers_opened = True
@@ -174,8 +176,8 @@ class DummyOptions:
     def get_socket_map(self):
         return self.socket_map
 
-    def make_logger(self, critical_msgs, warn_msgs, info_msgs):
-        self.make_logger_messages = critical_msgs, warn_msgs, info_msgs
+    def make_logger(self):
+        pass
 
     def clear_autochildlogdir(self):
         self.autochildlogdir_cleared = True
@@ -272,7 +274,7 @@ class DummyOptions:
         self.execv_environment = environment
         return DummyPopen(filename, argv, environment)
 
-    def dropPrivileges(self, uid):
+    def drop_privileges(self, uid):
         if self.setuid_msg:
             return self.setuid_msg
         self.privsdropped = uid
@@ -415,6 +417,9 @@ class DummySocketConfig:
 
     def __ne__(self, other):
         return not self.__eq__(other)
+
+    def get_backlog(self):
+        return 128
 
     def create_and_bind(self):
         return DummySocket(self.fd)
@@ -574,9 +579,11 @@ class DummyPConfig:
                  uid=None, stdout_logfile=None, stdout_capture_maxbytes=0,
                  stdout_events_enabled=False,
                  stdout_logfile_backups=0, stdout_logfile_maxbytes=0,
+                 stdout_syslog=False,
                  stderr_logfile=None, stderr_capture_maxbytes=0,
                  stderr_events_enabled=False,
                  stderr_logfile_backups=0, stderr_logfile_maxbytes=0,
+                 stderr_syslog=False,
                  redirect_stderr=False,
                  stopsignal=None, stopwaitsecs=10, stopasgroup=False, killasgroup=False,
                  exitcodes=(0, ), environment=None, serverurl=None,
@@ -596,11 +603,13 @@ class DummyPConfig:
         self.stdout_events_enabled = stdout_events_enabled
         self.stdout_logfile_backups = stdout_logfile_backups
         self.stdout_logfile_maxbytes = stdout_logfile_maxbytes
+        self.stdout_syslog = stdout_syslog
         self.stderr_logfile = stderr_logfile
         self.stderr_capture_maxbytes = stderr_capture_maxbytes
         self.stderr_events_enabled = stderr_events_enabled
         self.stderr_logfile_backups = stderr_logfile_backups
         self.stderr_logfile_maxbytes = stderr_logfile_maxbytes
+        self.stderr_syslog = stderr_syslog
         self.redirect_stderr = redirect_stderr
         if stopsignal is None:
             import signal
@@ -1275,6 +1284,7 @@ class DummyEvent:
 class DummyPoller:
     def __init__(self, options):
         self.result = [], []
+        self.closed = False
 
     def register_readable(self, fd):
         pass
@@ -1284,6 +1294,9 @@ class DummyPoller:
 
     def poll(self, timeout):
         return self.result
+
+    def close(self):
+        self.closed = True
 
 
 def dummy_handler(event, result):

@@ -16,17 +16,47 @@ file it finds.
 
 #. :file:`/etc/supervisord.conf`
 
+#. :file:`/etc/supervisor/supervisord.conf` (since Supervisor 3.3.0)
+
 #. :file:`../etc/supervisord.conf` (Relative to the executable)
 
 #. :file:`../supervisord.conf` (Relative to the executable)
 
 .. note::
 
-  Some distributions have packaged Supervisor with their own
-  customizations.  These modified versions of Supervisor may load the
-  configuration file from locations other than those described here.
-  Notably, Ubuntu packages have been found that use
-  ``/etc/supervisor/supervisord.conf``.
+  Many versions of Supervisor packaged for Debian and Ubuntu included a patch
+  that added ``/etc/supervisor/supervisord.conf`` to the search paths.  The
+  first PyPI package of Supervisor to include it was Supervisor 3.3.0.
+
+File Format
+-----------
+
+:file:`supervisord.conf` is a Windows-INI-style (Python ConfigParser)
+file.  It has sections (each denoted by a ``[header]``) and key / value
+pairs within the sections.  The sections and their allowable values
+are described below.
+
+Environment Variables
+~~~~~~~~~~~~~~~~~~~~~
+
+Environment variables that are present in the environment at the time that
+:program:`supervisord` is started can be used in the configuration file
+using the Python string expression syntax ``%(ENV_X)s``:
+
+.. code-block:: ini
+
+    [program:example]
+    command=/usr/bin/example --loglevel=%(ENV_LOGLEVEL)s
+
+In the example above, the expression ``%(ENV_LOGLEVEL)s`` would be expanded
+to the value of the environment variable ``LOGLEVEL``.
+
+.. note::
+
+    In Supervisor 3.2 and later, ``%(ENV_X)s`` expressions are supported in
+    all options.  In prior versions, some options support them, but most
+    do not.  See the documentation for each option below.
+
 
 File Format
 -----------
@@ -73,18 +103,26 @@ configuration values are as follows.
 
 ``file``
 
-  A path to a UNIX domain socket (e.g. :file:`/tmp/supervisord.sock`)
-  on which supervisor will listen for HTTP/XML-RPC requests.
-  :program:`supervisorctl` uses XML-RPC to communicate with
-  :program:`supervisord` over this port.  This option can include the
-  value ``%(here)s``, which expands to the directory in which the
-  :program:`supervisord` configuration file was found.
+  A path to a UNIX domain socket on which supervisor will listen for
+  HTTP/XML-RPC requests.  :program:`supervisorctl` uses XML-RPC to
+  communicate with :program:`supervisord` over this port.  This option
+  can include the value ``%(here)s``, which expands to the directory
+  in which the :program:`supervisord` configuration file was found.
 
   *Default*:  None.
 
   *Required*:  No.
 
   *Introduced*: 3.0
+
+.. warning::
+
+  The example configuration output by :program:`echo_supervisord_conf` uses
+  ``/tmp/supervisor.sock`` as the socket file.  That path is an example only
+  and will likely need to be changed to a location more appropriate for your
+  system.  Some systems periodically delete older files in ``/tmp``.  If the
+  socket file is deleted, :program:`supervisorctl` will be unable to
+  connect to :program:`supervisord`.
 
 ``chmod``
 
@@ -157,6 +195,19 @@ inserted.  If the configuration file has no ``[inet_http_server]``
 section, an inet HTTP server will not be started.  The allowable
 configuration values are as follows.
 
+.. warning::
+
+  The inet HTTP server is not enabled by default.  If you choose to enable it,
+  please read the following security warning.  The inet HTTP server is intended
+  for use within a trusted environment only.  It should only be bound to localhost
+  or only accessible from within an isolated, trusted network.  The inet HTTP server
+  does not support any form of encryption.  The inet HTTP server does not use
+  authentication by default (see the ``username=`` and ``password=`` options).
+  The inet HTTP server can be controlled remotely from :program:`supervisorctl`.
+  It also serves a web interface that allows subprocesses to be started or stopped,
+  and subprocess logs to be viewed.  **Never expose the inet HTTP server to the
+  public internet.**
+
 ``[inet_http_server]`` Section Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -166,7 +217,8 @@ configuration values are as follows.
   supervisor will listen for HTTP/XML-RPC requests.
   :program:`supervisorctl` will use XML-RPC to communicate with
   :program:`supervisord` over this port.  To listen on all interfaces
-  in the machine, use ``:9001`` or ``*:9001``.
+  in the machine, use ``:9001`` or ``*:9001``.  Please read the security
+  warning above.
 
   *Default*:  No default.
 
@@ -321,7 +373,8 @@ follows.
   is run as root.  supervisord uses file descriptors liberally, and will
   enter a failure mode when one cannot be obtained from the OS, so it's
   useful to be able to specify a minimum value to ensure it doesn't run out
-  of them during execution. This option is particularly useful on Solaris,
+  of them during execution.  These limits will be inherited by the managed
+  subprocesses.  This option is particularly useful on Solaris,
   which has a low per-process fd limit by default.
 
   *Default*:  1024
@@ -374,15 +427,17 @@ follows.
   Instruct :program:`supervisord` to switch users to this UNIX user
   account before doing any meaningful processing.  The user can only
   be switched if :program:`supervisord` is started as the root user.
-  If :program:`supervisord` can't switch users, it will still continue
-  but will write a log message at the ``critical`` level saying that it
-  can't drop privileges.
 
   *Default*: do not switch users
 
   *Required*:  No.
 
   *Introduced*: 3.0
+
+  *Changed*: 3.3.4.  If :program:`supervisord` can't switch to the
+  specified user, it will write an error message to ``stderr`` and
+  then exit immediately.  In earlier versions, it would continue to
+  run but would log a message at the ``critical`` level.
 
 ``directory``
 
@@ -612,6 +667,14 @@ where specified.
   responsible for daemonizing its subprocesses (see
   :ref:`nondaemonizing_of_subprocesses`).
 
+  .. note::
+
+    The command will be truncated if it looks like a config file comment,
+    e.g. ``command=bash -c 'foo ; bar'`` will be truncated to
+    ``command=bash -c 'foo``.  Quoting will not prevent this behavior,
+    since the configuration file reader does not parse the command like
+    a shell would.
+
   *Default*: No default.
 
   *Required*:  Yes.
@@ -776,10 +839,10 @@ where specified.
 
 ``stopwaitsecs``
 
-  The number of seconds to wait for the OS to return a SIGCHILD to
+  The number of seconds to wait for the OS to return a SIGCHLD to
   :program:`supervisord` after the program has been sent a stopsignal.
   If this number of seconds elapses before :program:`supervisord`
-  receives a SIGCHILD from the process, :program:`supervisord` will
+  receives a SIGCHLD from the process, :program:`supervisord` will
   attempt to kill it with a final SIGKILL.
 
   *Default*: 10
@@ -919,7 +982,7 @@ where specified.
 
   *Required*:  No.
 
-  *Introduced*: 3.0, replaces 2.0's ``logfile_backups``
+  *Introduced*: 3.0
 
 ``stdout_events_enabled``
 
@@ -1131,6 +1194,12 @@ section, it must contain a single key named "files".  The values in
 this key specify other configuration files to be included within the
 configuration.
 
+.. note::
+
+    The ``[include]`` section is processed only by ``supervisord``.  It is
+    ignored by ``supervisorctl``.
+
+
 ``[include]`` Section Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1142,14 +1211,18 @@ configuration.
   includes it.  A "glob" is a file pattern which matches a specified
   pattern according to the rules used by the Unix shell. No tilde
   expansion is done, but ``*``, ``?``, and character ranges expressed
-  with ``[]`` will be correctly matched.  Recursive includes from
-  included files are not supported.
+  with ``[]`` will be correctly matched.  The string expression is
+  evaluated against a dictionary that includes ``host_node_name``
+  and ``here`` (the directory of the supervisord config file).  Recursive
+  includes from included files are not supported.
 
   *Default*: No default (required)
 
   *Required*:  Yes.
 
   *Introduced*: 3.0
+
+  *Changed*: 3.3.0.  Added support for the ``host_node_name`` expansion.
 
 ``[include]`` Section Example
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1279,6 +1352,11 @@ the web server and the process manager to each do what they do best.
    number ``0`` (zero).  When the last child in the group exits,
    Supervisor will close the socket.
 
+.. note::
+
+   Prior to Supervisor 3.4.0, FastCGI programs (``[fcgi-program:x]``)
+   could not be referenced in groups (``[group:x]``).
+
 All the options available to ``[program:x]`` sections are
 also respected by ``fcgi-program`` sections.
 
@@ -1302,6 +1380,16 @@ sections do not have.
   *Required*:  Yes.
 
   *Introduced*: 3.0
+
+``socket_backlog``
+
+  Sets socket listen(2) backlog.
+
+  *Default*: socket.SOMAXCONN
+
+  *Required*:  No.
+
+  *Introduced*: 3.4.0
 
 ``socket_owner``
 
@@ -1377,10 +1465,9 @@ an explanation of how events work and how to implement programs that
 can be declared as event listeners.
 
 Note that all the options available to ``[program:x]`` sections are
-respected by eventlistener sections *except* for
-``stdout_capture_maxbytes`` and ``stderr_capture_maxbytes`` (event
-listeners cannot emit process communication events, see
-:ref:`capture_mode`).
+respected by eventlistener sections *except* for ``stdout_capture_maxbytes``.
+Eventlisteners cannot emit process communication events on ``stdout``,
+but can emit on ``stderr`` (see :ref:`capture_mode`).
 
 ``[eventlistener:x]`` Section Values
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

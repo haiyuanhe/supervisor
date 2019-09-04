@@ -3,15 +3,15 @@ import shlex
 import signal
 import socket
 
+from supervisor.utils import raise_not_implemented
 from supervisor.compat import urlparse
 from supervisor.compat import long
 from supervisor.loggers import getLevelNumByDescription
-from supervisor.utils import raise_not_implemented
 
 
 def process_or_group_name(name):
     """Ensures that a process or group name is not created with
-       characters that break the eventlistener protocol"""
+       characters that break the eventlistener protocol or web UI URLs"""
     s = str(name).strip()
     for character in ' :/':
         if character in s:
@@ -75,7 +75,7 @@ def dict_of_key_value_pairs(arg):
     """ parse KEY=val,KEY2=val2 into {'KEY':'val', 'KEY2':'val2'}
         Quotes can be used to allow commas in the value
     """
-    lexer = shlex.shlex(str(arg), posix=True)
+    lexer = shlex.shlex(str(arg))
     lexer.wordchars += '/.+-():'
 
     tokens = list(lexer)
@@ -88,7 +88,7 @@ def dict_of_key_value_pairs(arg):
         if len(k_eq_v) != 3 or k_eq_v[1] != '=':
             raise ValueError(
                 "Unexpected end of key/value pairs in value '%s'" % arg)
-        D[k_eq_v[0]] = k_eq_v[2]
+        D[k_eq_v[0]] = k_eq_v[2].strip('\'"')
         i += 4
     return D
 
@@ -177,6 +177,7 @@ class SocketConfig(object):
     for TCP vs Unix sockets """
     url = ''  # socket url
     addr = None  # socket addr
+    backlog = None # socket listen backlog
 
     def __repr__(self):
         return '<%s at %s for %s>' % (self.__class__,
@@ -198,6 +199,9 @@ class SocketConfig(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
+    def get_backlog(self):
+        return self.backlog
+
     def addr(self):  # pragma: no cover
         raise NotImplementedError
 
@@ -211,10 +215,12 @@ class InetStreamSocketConfig(SocketConfig):
     host = None  # host name or ip to bind to
     port = None  # integer port to bind to
 
-    def __init__(self, host, port):
+    def __init__(self, host, port, **kwargs):
         self.host = host.lower()
         self.port = port_number(port)
         self.url = 'tcp://%s:%d' % (self.host, self.port)
+        self.backlog = kwargs.get('backlog', None)
+        self.so_reuse_addr = kwargs.get('so_reuse_addr', True)
 
     def addr(self):
         return self.host, self.port
@@ -222,7 +228,7 @@ class InetStreamSocketConfig(SocketConfig):
     def create_and_bind(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, self.so_reuse_addr)
             sock.bind(self.addr())
         except:
             sock.close()
@@ -284,7 +290,7 @@ def existing_dirpath(v):
     if os.path.isdir(dir):
         return nv
     raise ValueError('The directory named as part of the path %s '
-                     'does not exist.' % v)
+                     'does not exist' % v)
 
 
 def logging_level(value):
@@ -331,7 +337,6 @@ def url(value):
     if scheme and (netloc or path):
         return value
     raise ValueError("value %r is not a URL" % value)
-
 
 # all valid signal numbers
 SIGNUMS = [getattr(signal, k) for k in dir(signal) if k.startswith('SIG')]

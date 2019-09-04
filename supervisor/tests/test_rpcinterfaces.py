@@ -1145,12 +1145,12 @@ class SupervisorNamespaceXMLRPCInterfaceTests(TestBase):
         self.assertEqual(configs[0]['stdout_capture_maxbytes'], 0)
         self.assertEqual(configs[0]['name'], 'process1')
         self.assertEqual(configs[0]['stopsignal'], 15)
-        # self.assertEqual(configs[0]['stderr_syslog'], False)
+        #self.assertEqual(configs[0]['stderr_syslog'], False)
         self.assertEqual(configs[0]['stdout_logfile_maxbytes'], 0)
         self.assertEqual(configs[0]['group_prio'], 999)
         self.assertEqual(configs[0]['killasgroup'], False)
         self.assertEqual(configs[0]['process_prio'], 999)
-        # self.assertEqual(configs[0]['stdout_syslog'], False)
+        #self.assertEqual(configs[0]['stdout_syslog'], False)
         self.assertEqual(configs[0]['stderr_logfile_maxbytes'], 0)
         self.assertEqual(configs[0]['startsecs'], 10)
         self.assertEqual(configs[0]['redirect_stderr'], False)
@@ -2236,44 +2236,34 @@ class SystemNamespaceXMLRPCInterfaceTests(TestBase):
 
     def test_multicall_simplevals(self):
         interface = self._makeOne()
-        callback = interface.multicall([
+        results = interface.multicall([
             {'methodName': 'system.methodHelp', 'params': ['system.methodHelp']},
             {'methodName': 'system.listMethods', 'params': []},
         ])
-        from supervisor import http
-        result = http.NOT_DONE_YET
-        while result is http.NOT_DONE_YET:
-            result = callback()
-        self.assertEqual(result[0], interface.methodHelp('system.methodHelp'))
-        self.assertEqual(result[1], interface.listMethods())
+        self.assertEqual(results[0], interface.methodHelp('system.methodHelp'))
+        self.assertEqual(results[1], interface.listMethods())
 
     def test_multicall_recursion_guard(self):
         from supervisor import xmlrpc
         interface = self._makeOne()
-        callback = interface.multicall([
+        results = interface.multicall([
             {'methodName': 'system.multicall', 'params': []},
         ])
 
-        from supervisor import http
-        result = http.NOT_DONE_YET
-        while result is http.NOT_DONE_YET:
-            result = callback()
-
-        code = xmlrpc.Faults.INCORRECT_PARAMETERS
-        desc = xmlrpc.getFaultDescription(code)
-        recursion_fault = {'faultCode': code, 'faultString': desc}
-
-        self.assertEqual(result, [recursion_fault])
+        e = xmlrpc.RPCError(xmlrpc.Faults.INCORRECT_PARAMETERS,
+                'Recursive system.multicall forbidden')
+        recursion_fault = {'faultCode': e.code, 'faultString': e.text}
+        self.assertEqual(results, [recursion_fault])
 
     def test_multicall_nested_callback(self):
+        from supervisor import http
         interface = self._makeOne()
         callback = interface.multicall([
             {'methodName': 'supervisor.stopAllProcesses'}])
-        from supervisor import http
-        result = http.NOT_DONE_YET
-        while result is http.NOT_DONE_YET:
-            result = callback()
-        self.assertEqual(result[0], [])
+        results = http.NOT_DONE_YET
+        while results is http.NOT_DONE_YET:
+            results = callback()
+        self.assertEqual(results[0], [])
 
     def test_methodHelp(self):
         from supervisor import xmlrpc

@@ -109,7 +109,7 @@ value in the configuration file.
    occurs.  The value is suffix-multiplied, e.g "1" is one byte, "1MB"
    is 1 megabyte, "1GB" is 1 gigabyte.
 
--y NUM, --logfile_backups=NUM
+-z NUM, --logfile_backups=NUM
 
    Number of backup copies of the supervisord activity log to keep
    around.  Each logfile will be of size ``logfile_maxbytes``.
@@ -165,6 +165,27 @@ value in the configuration file.
    The minimum number of OS process slots that must be available to
    the supervisord process before it will start successfully.
 
+
+Running :program:`supervisorctl`
+--------------------------------
+
+To start :program:`supervisorctl`, run ``$BINDIR/supervisorctl``.  A
+shell will be presented that will allow you to control the processes
+that are currently managed by :program:`supervisord`.  Type "help" at
+the prompt to get information about the supported commands.
+
+The :command:`supervisorctl` executable may be invoked with "one time"
+commands when invoked with arguments from a command line.  An example:
+``supervisorctl stop all``.  If arguments are present on the
+command-line, it will prevent the interactive shell from being
+invoked.  Instead, the command will be executed and ``supervisorctl``
+will exit with a code of 0 for success or running and non-zero for
+error. An example: ``supervisorctl status all`` would return non-zero
+if any single process was not running.
+
+If :command:`supervisorctl` is invoked in interactive mode against a
+:program:`supervisord` that requires authentication, you will be asked
+for authentication credentials.
 
 :command:`supervisorctl` Command-Line Options
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -223,11 +244,11 @@ add <name> [...]
 remove <name> [...]
 
    Removes process/group from active config
-   
+
 update
 
    Reload config and add/remove as necessary, and will restart affected programs
-   
+
 update all
 
    Reload config and add/remove as necessary, and will restart affected programs
@@ -297,21 +318,58 @@ signal
 
    No help on signal
 
-To start :program:`supervisorctl`, run ``$BINDIR/supervisorctl``.  A
-shell will be presented that will allow you to control the processes
-that are currently managed by :program:`supervisord`.  Type "help" at
-the prompt to get information about the supported commands.
+start <name>
 
-The :command:`supervisorctl` executable may be invoked with "one time"
-commands when invoked with arguments from a command line.  An example:
-``supervisorctl stop all``.  If arguments are present on the
-command-line, it will prevent the interactive shell from being
-invoked.  Instead, the command will be executed and
-``supervisorctl`` will exit.
+   Start a process
 
-If :command:`supervisorctl` is invoked in interactive mode against a
-:program:`supervisord` that requires authentication, you will be asked
-for authentication credentials.
+start <gname>:*
+
+   Start all processes in a group
+
+start <name> <name>
+
+   Start multiple processes or groups
+
+start all
+
+   Start all processes
+
+status
+
+   Get all process status info.
+
+status <name>
+
+   Get status on a single process by name.
+
+status <name> <name>
+
+   Get status on multiple named processes.
+
+stop <name>
+
+   Stop a process
+
+stop <gname>:*
+
+   Stop all processes in a group
+
+stop <name> <name>
+
+   Stop multiple processes or groups
+
+stop all
+
+   Stop all processes
+
+tail [-f] <name> [stdout|stderr] (default stdout)
+
+   Output the last part of process logs
+   Ex:
+   tail -f <name>		Continuous tail of named process stdout Ctrl-C to exit.
+   tail -100 <name>	last 100 *bytes* of process stdout
+   tail <name> stderr	last 1600 *bytes* of process stderr
+
 
 Signals
 -------
@@ -345,7 +403,7 @@ Signal Handlers
 ``SIGHUP``
 
   :program:`supervisord` will stop all processes, reload the
-  configuration from the first config file it finds, and restart all
+  configuration from the first config file it finds, and start all
   processes.
 
 ``SIGUSR2``

@@ -71,7 +71,7 @@ class LogtailHandlerTests(HandlerTests, unittest.TestCase):
             from supervisor.medusa import http_date
             self.assertEqual(request.headers['Last-Modified'],
                              http_date.build_http_date(os.stat(tfilename)[stat.ST_MTIME]))
-            self.assertEqual(request.headers['Content-Type'], 'text/plain')
+            self.assertEqual(request.headers['Content-Type'], 'text/plain;charset=utf-8')
             self.assertEqual(len(request.producers), 1)
             self.assertEqual(request._done, True)
         finally:
@@ -110,7 +110,7 @@ class MainLogTailHandlerTests(HandlerTests, unittest.TestCase):
             from supervisor.medusa import http_date
             self.assertEqual(request.headers['Last-Modified'],
                              http_date.build_http_date(os.stat(tfilename)[stat.ST_MTIME]))
-            self.assertEqual(request.headers['Content-Type'], 'text/plain')
+            self.assertEqual(request.headers['Content-Type'], 'text/plain;charset=utf-8')
             self.assertEqual(len(request.producers), 1)
             self.assertEqual(request._done, True)
         finally:
@@ -243,7 +243,6 @@ class DeferringChunkedProducerTests(unittest.TestCase):
         producer = self._makeOne(None)
         self.assertEqual(producer.more(), b'')
 
-
 class DeferringCompositeProducerTests(unittest.TestCase):
     def _getTargetClass(self):
         from supervisor.http import deferring_composite_producer
@@ -269,7 +268,6 @@ class DeferringCompositeProducerTests(unittest.TestCase):
         wrapped = DummyProducer()
         producer = self._makeOne([wrapped])
         self.assertEqual(producer.more(), b'')
-
 
 class DeferringGlobbingProducerTests(unittest.TestCase):
     def _getTargetClass(self):
@@ -297,7 +295,6 @@ class DeferringGlobbingProducerTests(unittest.TestCase):
         wrapped = DummyProducer()
         producer = self._makeOne(wrapped)
         self.assertEqual(producer.more(), b'')
-
 
 class DeferringHookedProducerTests(unittest.TestCase):
     def _getTargetClass(self):
@@ -341,7 +338,7 @@ class DeferringHookedProducerTests(unittest.TestCase):
         self.assertEqual(producer.more(), b'')
 
 
-class Test_deferring_http_request(unittest.TestCase):
+class DeferringHttpRequestTests(unittest.TestCase):
     def _getTargetClass(self):
         from supervisor.http import deferring_http_request
         return deferring_http_request
@@ -459,6 +456,57 @@ class Test_deferring_http_request(unittest.TestCase):
         )
         inst.done()
         self.assertTrue(channel.closed)
+
+class DeferringHttpChannelTests(unittest.TestCase):
+    def _getTargetClass(self):
+        from supervisor.http import deferring_http_channel
+        return deferring_http_channel
+
+    def _makeOne(self):
+        return self._getTargetClass()(
+            server=None,
+            conn=None,
+            addr=None
+            )
+
+    def test_defaults_delay_and_last_writable_check_time(self):
+        channel = self._makeOne()
+        self.assertEqual(channel.delay, 0)
+        self.assertEqual(channel.last_writable_check, 0)
+
+    def test_writable_with_delay_is_False_if_elapsed_lt_delay(self):
+        channel = self._makeOne()
+        channel.delay = 2
+        channel.last_writable_check = _NOW
+        later = _NOW + 1
+        self.assertFalse(channel.writable(now=later))
+        self.assertEqual(channel.last_writable_check, _NOW)
+
+    def test_writable_with_delay_is_False_if_elapsed_eq_delay(self):
+        channel = self._makeOne()
+        channel.delay = 2
+        channel.last_writable_check = _NOW
+        later = _NOW + channel.delay
+        self.assertFalse(channel.writable(now=later))
+        self.assertEqual(channel.last_writable_check, _NOW)
+
+    def test_writable_with_delay_is_True_if_elapsed_gt_delay(self):
+        channel = self._makeOne()
+        channel.delay = 2
+        channel.last_writable_check = _NOW
+        later = _NOW + channel.delay + 0.1
+        self.assertTrue(channel.writable(now=later))
+        self.assertEqual(channel.last_writable_check, later)
+
+    def test_writable_with_delay_is_True_if_system_time_goes_backwards(self):
+        channel = self._makeOne()
+        channel.delay = 2
+        channel.last_writable_check = _NOW
+        later = _NOW - 3600 # last check was in the future
+        self.assertTrue(channel.writable(now=later))
+        self.assertEqual(channel.last_writable_check, later)
+
+_NOW = 1470085990
 
 
 class EncryptedDictionaryAuthorizedTests(unittest.TestCase):
@@ -649,7 +697,6 @@ class DummyProducer:
             return self.data.pop(0)
         else:
             return b''
-
 
 def test_suite():
     return unittest.findTestCases(sys.modules[__name__])

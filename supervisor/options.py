@@ -111,7 +111,9 @@ class Options(object):
                        os.path.join(here, 'supervisord.conf'),
                        'supervisord.conf',
                        'etc/supervisord.conf',
-                       '/etc/supervisord.conf']
+                       '/etc/supervisord.conf',
+                       '/etc/supervisor/supervisord.conf',
+                       ]
         self.searchpaths = searchpaths
 
         self.environ_expansions = {}
@@ -303,15 +305,7 @@ class Options(object):
                 if name and value is not None:
                     self._set(name, value, 1)
 
-        if self.configfile is None and "supervisord" in self.progname:  # pragma: no cover
-            self.warnings.warn(
-                'Supervisord is searching for its configuration file in default locations '
-                '(including its current working directory); you '
-                'probably want to specify a "-c" argument specifying an '
-                'absolute path to a configuration file for improved '
-                'security.'
-            )
-
+        if self.configfile is None  and "supervisord" in self.progname:
             self.configfile = self.default_configfile()
 
         self.process_config()
@@ -415,7 +409,8 @@ class ServerOptions(Options):
     environment = None
     serverurl = None
     httpservers = ()
-    unlink_socketfiles = True
+    unlink_pidfile = False
+    unlink_socketfiles = False
     mood = states.SupervisorStates.RUNNING
     job_handler = None
 
@@ -461,6 +456,7 @@ class ServerOptions(Options):
         # subprocess history by pid
         self.pidhistory = {}
         self.process_group_configs = []
+        self.parse_criticals = []
         self.parse_warnings = []
         self.parse_infos = []
         self.signal_receiver = SignalReceiver()
@@ -475,6 +471,17 @@ class ServerOptions(Options):
     # TODO: not covered by any test, but used by dispatchers
     def getLogger(self, *args, **kwargs):
         return loggers.getLogger(*args, **kwargs)
+
+    def default_configfile(self):
+        self.warnings.warn(
+            'Supervisord is running as root and it is searching '
+            'for its configuration file in default locations '
+            '(including its current working directory); you '
+            'probably want to specify a "-c" argument specifying an '
+            'absolute path to a configuration file for improved '
+            'security.'
+            )
+        return Options.default_configfile(self)
 
     def realize(self, *arg, **kw):
         Options.realize(self, *arg, **kw)
@@ -521,8 +528,9 @@ class ServerOptions(Options):
         self.process_group_configs = new
 
     def read_config(self, fp):
-        # Clear parse warnings, since we may be re-reading the
+        # Clear parse messages, since we may be re-reading the
         # config a second time after a reload.
+        self.parse_criticals = []
         self.parse_warnings = []
         self.parse_infos = []
 
@@ -701,10 +709,15 @@ class ServerOptions(Options):
             if not section.startswith('eventlistener:'):
                 continue
             pool_name = section.split(':', 1)[1]
+
             # give listeners a "high" default priority so they are started first
             # and stopped last at mainloop exit
             priority = integer(get(section, 'priority', -1))
+
             buffer_size = integer(get(section, 'buffer_size', 10))
+            if buffer_size < 1:
+                raise ValueError('[%s] section sets invalid buffer_size (%d)' %
+                    (section, buffer_size))
 
             result_handler = get(section, 'result_handler',
                                  'supervisor.dispatchers:default_handler')
@@ -984,10 +997,12 @@ class ServerOptions(Options):
         get = parser.saneget
         username = get(section, 'username', None)
         password = get(section, 'password', None)
-        if username is None and password is not None:
-            raise ValueError(
-                'Must specify username if password is specified in [%s]'
-                % section)
+        if username is not None or password is not None:
+            if username is None or password is None:
+                raise ValueError(
+                    'Section [%s] contains incomplete authentication: '
+                    'If a username or a password is specified, both the '
+                    'username and password must be specified' % section)
         return {'username': username, 'password': password}
 
     def server_configs_from_parser(self, parser):
@@ -1026,10 +1041,13 @@ class ServerOptions(Options):
         except (IOError, OSError):
             self.logger.critical('could not write pidfile %s' % self.pidfile)
         else:
+            self.unlink_pidfile = True
             self.logger.info('supervisord started with pid %s' % pid)
 
     def cleanup(self):
-        self._try_unlink(self.pidfile)
+        if self.unlink_pidfile:
+            self._try_unlink(self.pidfile)
+        self.poller.close()
 
     def _try_unlink(self, path):
         try:
@@ -1057,7 +1075,7 @@ class ServerOptions(Options):
             # descriptor to be closed, but it will still remain in
             # the socket_map, and eventually its file descriptor
             # will be passed to # select(), which will bomb.  See
-            # also http://www.plope.com/software/collector/253
+            # also https://web.archive.org/web/20160729222427/http://www.plope.com/software/collector/253
             server.close()
 
     def close_logger(self):
@@ -1081,6 +1099,7 @@ class ServerOptions(Options):
     def openhttpservers(self, supervisord):
         try:
             self.httpservers = self.make_http_servers(supervisord)
+            self.unlink_socketfiles = True
         except socket.error as why:
             if why.args[0] == errno.EADDRINUSE:
                 self.usage('Another program is already listening on '
@@ -1095,7 +1114,6 @@ class ServerOptions(Options):
                 else:
                     self.usage('%s errno.%s (%d)' %
                                (help, errorname, why.args[0]))
-            self.unlink_socketfiles = False
         except ValueError as why:
             self.usage(why.args[0])
 
@@ -1136,7 +1154,7 @@ class ServerOptions(Options):
     def kill(self, pid, sig):
         self.pidhistory[pid].process.send_signal(sig)
 
-    def set_uid(self):
+    def set_uid_or_exit(self):
         if self.uid is None:
             if False and os.getuid() == 0:
                 return 'Supervisor running as root (no user in config file)'
@@ -1174,11 +1192,11 @@ class ServerOptions(Options):
         return stopped
 
     @raise_not_implemented
-    def set_rlimits(self):
+    def set_rlimits_or_exit(self):
         """dummy"""
         pass
 
-    def make_logger(self, critical_messages, warn_messages, info_messages):
+    def make_logger(self):
         # must be called after realize() and after supervisor does setuid()
         format = '%(asctime)s %(levelname)s %(message)s\n'
         self.logger = loggers.getLogger(self.loglevel)
@@ -1192,11 +1210,11 @@ class ServerOptions(Options):
         )
         if self.nodaemon:
             loggers.handle_stdout(self.logger, format)
-        for msg in critical_messages:
+        for msg in self.parse_criticals:
             self.logger.critical(msg)
-        for msg in warn_messages:
+        for msg in self.parse_warnings:
             self.logger.warn(msg)
-        for msg in info_messages:
+        for msg in self.parse_infos:
             self.logger.info(msg)
 
     def make_http_servers(self, supervisord):
@@ -1230,7 +1248,7 @@ class ServerOptions(Options):
     def mktempfile(self, suffix, prefix, dir):
         # set os._urandomfd as a hack around bad file descriptor bug
         # seen in the wild, see
-        # http://www.plope.com/software/collector/252
+        # https://web.archive.org/web/20160729044005/http://www.plope.com/software/collector/252
         os._urandomfd = None
         fd, filename = tempfile.mkstemp(suffix, prefix, dir)
         os.close(fd)
@@ -1408,11 +1426,10 @@ class ClientOptions(Options):
         sections = parser.sections()
         if not 'supervisorctl' in sections:
             raise ValueError('.ini file does not include supervisorctl section')
-        serverurl = parser.getdefault('serverurl', 'http://localhost:9001')
+        serverurl = parser.getdefault('serverurl', 'http://localhost:9001',
+            expansions={'here': self.here})
         if serverurl.startswith('unix://'):
-            sf = serverurl[7:]
-            path = expand(sf, {'here': self.here}, 'serverurl')
-            path = normalize_path(path)
+            path = normalize_path(serverurl[7:])
             serverurl = 'unix://%s' % path
         section.serverurl = serverurl
 
@@ -1421,7 +1438,8 @@ class ClientOptions(Options):
         section.prompt = parser.getdefault('prompt', section.prompt)
         section.username = parser.getdefault('username', section.username)
         section.password = parser.getdefault('password', section.password)
-        history_file = parser.getdefault('history_file', section.history_file)
+        history_file = parser.getdefault('history_file', section.history_file,
+            expansions={'here': self.here})
 
         if history_file:
             history_file = normalize_path(history_file)
@@ -1462,19 +1480,15 @@ class UnhosedConfigParser(ConfigParser.RawConfigParser):
         # inline_comment_prefixes and strict were added in Python 3 but their
         # defaults make RawConfigParser behave differently than it did on
         # Python 2.  We make it work like 2 by default for backwards compat.
-        kwargs['inline_comment_prefixes'] = kwargs.pop('inline_comment_prefixes', (';', '#'))
         if not PY2:
             if 'inline_comment_prefixes' not in kwargs:
                 kwargs['inline_comment_prefixes'] = (';', '#')
 
             if 'strict' not in kwargs:
                 kwargs['strict'] = False
-        # fix backports issue
-        try:
-            ConfigParser.RawConfigParser.__init__(self, *args, **kwargs)
-        except TypeError:
-            del kwargs['inline_comment_prefixes']
-            ConfigParser.RawConfigParser.__init__(self, *args, **kwargs)
+
+        ConfigParser.RawConfigParser.__init__(self, *args, **kwargs)
+
         self.section_to_file = {}
         self.expansions = {}
 
@@ -1532,12 +1546,11 @@ class UnhosedConfigParser(ConfigParser.RawConfigParser):
                             expansions=expansions, **kwargs)
 
     def expand_here(self, here):
-        if here is None:
-            return
         HERE_FORMAT = '%(here)s'
         for section in self.sections():
             for key, value in self.items(section):
                 if HERE_FORMAT in value:
+                    assert here is not None, "here has not been set to a path"
                     value = value.replace(HERE_FORMAT, here)
                     value = value.replace("\\", "/")
                     self.set(section, key, value)

@@ -5,7 +5,7 @@
 Usage: %s [options]
 
 Options:
--c/--configuration FILENAME -- configuration file
+-c/--configuration FILENAME -- configuration file path (searches if not given)
 -n/--nodaemon -- run in the foreground (same as 'nodaemon=true' in config file)
 -h/--help -- print this usage message and exit
 -v/--version -- print supervisord version number and exit
@@ -35,16 +35,12 @@ import signal
 import time
 
 from supervisor.compat import as_string
-from supervisor import events
 from supervisor.medusa import asyncore_25 as asyncore
-from supervisor.options import (
-    ServerOptions,
-    signame
-)
-from supervisor.states import (
-    SupervisorStates,
-    getProcessStateDescription
-)
+from supervisor.options import ServerOptions
+from supervisor.options import signame
+from supervisor import events
+from supervisor.states import SupervisorStates
+from supervisor.states import getProcessStateDescription
 
 
 class Supervisor(object):
@@ -67,25 +63,16 @@ class Supervisor(object):
             except NotImplementedError:
                 pass
 
-        info_messages = []
-        critical_messages = []
-        warn_messages = []
-        setuid_msg = self.options.set_uid()
-        if setuid_msg:
-            critical_messages.append(setuid_msg)
+        self.options.set_uid_or_exit()
+
         if self.options.first:
             try:
-                rlimit_messages = self.options.set_rlimits()
-                info_messages.extend(rlimit_messages)
+                self.options.set_rlimits_or_exit()
             except NotImplementedError:
                 pass
-        info_messages.extend(self.options.parse_infos)
-        warn_messages.extend(self.options.parse_warnings)
-
         # this sets the options.logger object
         # delay logger instantiation until after setuid
-        self.options.make_logger(critical_messages, warn_messages,
-                                 info_messages)
+        self.options.make_logger()
 
         if not self.options.nocleanup:
             # clean up old automatic logs
@@ -345,8 +332,9 @@ class Supervisor(object):
                 if self.options.mood == SupervisorStates.SHUTDOWN:
                     self.options.logger.warn(
                         'ignored %s indicating restart request (shutdown in progress)' % signame(sig))
-                else:self.options.logger.warn('received %s indicating restart request' % signame(sig))
-                self.options.mood = SupervisorStates.RESTARTING
+                else:
+                    self.options.logger.warn('received %s indicating restart request' % signame(sig))
+                    self.options.mood = SupervisorStates.RESTARTING
             # elif sig == signal.SIGCHLD:
             #     self.options.logger.debug('received %s indicating a child quit' % signame(sig))
             # elif sig == signal.SIGUSR2:

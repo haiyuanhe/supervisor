@@ -18,7 +18,7 @@ import supervisor.medusa.http_server as http_server
 import supervisor.medusa.producers as producers
 from supervisor.medusa.util import html_repr
 
-unquote = http_server.urllib.unquote
+from supervisor.compat import urllib
 
 # This is the 'default' handler.  it implements the base set of
 # features expected of a simple file-delivering HTTP server.  file
@@ -83,7 +83,7 @@ class default_handler(object):
         path, params, query, fragment = request.split_uri()
 
         if '%' in path:
-            path = unquote(path)
+            path = urllib.unquote(path)
 
         # strip off all leading slashes
         while path and path[0] == '/':
